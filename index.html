@@ -469,7 +469,7 @@ function makeCard(e, group){
   else if (unit === 'min') sets = [{ kg: 0, reps: e.reps || '' }];
   else sets = Array.from({ length: e.sets || 3 }, () => ({ kg: e.kg === undefined ? '' : e.kg, reps: e.reps || '' }));
   return { name: e.name, group, unit, sets, saved, dirty: false, snap: saved ? clone(sets) : null,
-    hint: ls ? `지난번 ${ls.date.slice(5)} · ${fmtSets(ls.sets, unit)}` : '' };
+    hint: ls ? `지난번 ${ls.date.slice(5)} · ${fmtSets(ls.sets, unit)}` : '', goal: e.goal || '' };
 }
 function buildCards(){
   const r = S.init.routine[S.rid], L = S.data.logged;
@@ -495,7 +495,7 @@ function renderCards(){
       ${c.unit === 'min' ? '' : `<button class="ic" data-act="del" data-c="${ci}" data-s="${si}">✕</button>`}
     </div>`).join('');
     return `<div class="card ex"><div class="eh"><h3>${esc(c.name)}${c.saved && !c.dirty ? '<span class="badge">기록됨</span>' : ''}</h3></div>
-      <div class="hint">${esc(c.hint || '지난 기록 없음')}</div>${rows}
+      <div class="hint">${esc(c.hint || '지난 기록 없음')}</div>${c.goal ? `<div class="hint" style="font-weight:700">목표 ${esc(c.goal)}</div>` : ''}${rows}
       <div class="row" style="margin-top:8px;gap:8px">
         ${c.unit === 'min' ? '' : `<button data-act="add" data-c="${ci}">세트 추가</button>`}
         <button class="main sv" data-act="save" data-c="${ci}">${svLabel(c)}</button>
