@@ -111,6 +111,9 @@ textarea{resize:vertical;font:inherit}
 .lb{font-size:13px;color:var(--sub);margin:8px 0 4px;display:block}
 .f2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
 .f2 label{font-size:13px;color:var(--sub)}
+.tmr{background:var(--inp);color:var(--sub);min-width:88px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tmr.run{background:var(--okbg);color:var(--ok)}
+#hapl{position:fixed;left:-100px;top:-100px;opacity:0;pointer-events:none}
 #setup{position:fixed;inset:0;z-index:50;background:var(--bg);overflow:auto;padding:calc(24px + env(safe-area-inset-top,0px)) 14px 24px}
 #setup h2{margin:0 0 6px;font-size:20px}
 </style>
@@ -132,6 +135,10 @@ textarea{resize:vertical;font:inherit}
       <div id="dlabel" style="margin-top:6px;font-weight:700"></div>
       <div class="row" style="margin-top:8px">
         <select id="rsel" class="grow"></select>
+        <select id="restsel" aria-label="휴식 시간" style="width:104px;flex:none">
+          <option value="45">휴식 45초</option><option value="60">휴식 60초</option><option value="90">휴식 90초</option>
+          <option value="120">휴식 120초</option><option value="150">휴식 150초</option><option value="180">휴식 180초</option>
+        </select>
       </div>
     </div>
     <div class="card sm" id="summary"></div>
@@ -231,6 +238,7 @@ textarea{resize:vertical;font:inherit}
 
 </main>
 <div class="toast" id="toast"></div>
+<label id="hapl" aria-hidden="true"><input type="checkbox" switch tabindex="-1"></label>
 <nav>
   <button data-t="work" class="on"><span class="ic2">🏋️</span>운동</button>
   <button data-t="ib"><span class="ic2">⚖️</span>인바디</button>
@@ -270,7 +278,9 @@ function getCfg(){ const c = lsGet(LS.cfg); return c && c.url && c.token ? c : n
 async function run(fn, ...args){
   const c = getCfg(); if (!c) throw new Error('NOCFG');
   let res;
-  try { res = await fetch(c.url, { method: 'POST', body: JSON.stringify({ t: c.token, fn, args }) }); }
+  const body = JSON.stringify({ t: c.token, fn, args }), opt = { method: 'POST', body };
+  if (body.length < 60000) opt.keepalive = true;
+  try { res = await fetch(c.url, opt); }
   catch (e) { throw new Error('서버에 연결하지 못했어요 (인터넷을 확인해 주세요)'); }
   let j;
   try { j = await res.json(); }
@@ -439,6 +449,7 @@ function applyDay(b, keepRid){
 }
 async function loadDay(keepRid){
   await flushSave();
+  await flushWorkout();
   if (!S.init || !S.init.routine){ location.reload(); return; }
   S.date = $('#date').value || S.init.today;
   $('#date').value = S.date; dateLabel();
@@ -499,10 +510,12 @@ function renderCards(){
       <div class="row" style="margin-top:8px;gap:8px">
         ${c.unit === 'min' ? '' : `<button data-act="add" data-c="${ci}">세트 추가</button>`}
         <button class="main sv" data-act="save" data-c="${ci}">${svLabel(c)}</button>
+        <button class="tmr" data-act="rest" data-n="${esc(c.name)}">${restLabel(c.name)}</button>
       </div>
       ${c.saved ? `<div style="text-align:right;margin-top:6px"><button class="ic" data-act="unsave" data-c="${ci}" style="font-size:13px">기록 취소</button></div>` : ''}
     </div>`;
   }).join('');
+  paintRest();
 }
 // 불러오는 중에 입력을 시작했는지 표시 (그 경우 늦게 온 서버 데이터로 화면을 덮어쓰지 않음)
 document.querySelector('main').addEventListener('input', () => { S.touched = true; }, true);
@@ -516,7 +529,9 @@ $('#list').addEventListener('input', e => {
 });
 $('#list').addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
-  const ci = +b.dataset.c, c = S.cards[ci], act = b.dataset.act;
+  const act = b.dataset.act;
+  if (act === 'rest'){ startRest(b.dataset.n); return; }
+  const ci = +b.dataset.c, c = S.cards[ci];
   if (act === 'add'){ const l = c.sets[c.sets.length - 1] || { kg: '', reps: '' }; c.sets.push({ kg: l.kg, reps: l.reps }); c.dirty = true; renderCards(); }
   if (act === 'del'){ c.sets.splice(+b.dataset.s, 1); c.dirty = true; renderCards(); }
   if (act === 'save') saveCard(ci);
@@ -533,22 +548,43 @@ async function needFresh(){
   if (S.fresh) return true;
   toast('서버에 연결되지 않아 저장할 수 없어요'); return false;
 }
-async function saveCard(ci){
+// 저장은 화면을 먼저 바꾸고(바로 반응), 서버 저장은 뒤에서 차례대로 보내요. 실패하면 3번까지 다시 시도해요.
+const WS = { run: false, again: false, bad: false, dirty: false };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const WS_BAD = '운동 기록이 서버에 안 올라갔어요 · 저장을 다시 눌러 주세요';
+async function syncWorkout(){
+  if (WS.run){ WS.again = true; return; }
+  WS.run = true; setChip('서버에 저장 중…');
+  try {
+    do {
+      WS.again = false;
+      for (let tries = 1; ; tries++){
+        try { await persistWorkout(); break; }
+        catch (e){ if (errMsg(e) === '인증 실패' || tries >= 3) throw e; await sleep(1200 * tries); }
+      }
+    } while (WS.again);
+    WS.dirty = false; setChip('저장됨 ✓', 'ok');
+    if (WS.bad){ WS.bad = false; toast('운동 기록이 서버에 저장됐어요'); }
+  } catch (err){
+    WS.bad = true; setChip(WS_BAD, 'bad'); toast('서버 저장 실패: ' + errMsg(err)); haptic([80, 60, 80]);
+  }
+  WS.run = false;
+}
+async function flushWorkout(){ while (WS.run) await sleep(80); }
+function saveCard(ci){
   const c = S.cards[ci];
   if (!c.sets.some(s => Number(s.reps) > 0)){ toast('횟수를 먼저 입력해 주세요'); return; }
-  if (!(await needFresh())) return;
-  const prev = { saved: c.saved, dirty: c.dirty, snap: c.snap };
-  c.snap = clone(c.sets); c.saved = true; c.dirty = false;
-  try { await persistWorkout(); renderCards(); recalc(); scheduleSave(); snapshotCache(); toast(`${c.name} 저장됨`); }
-  catch (err){ Object.assign(c, prev); renderCards(); toast('저장 실패: ' + errMsg(err)); }
+  if (!S.fresh){ needFresh().then(ok => { if (ok) saveCard(ci); }); return; }
+  c.snap = clone(c.sets); c.saved = true; c.dirty = false; WS.dirty = true;
+  renderCards(); recalc(); scheduleSave(); snapshotCache(); toast(`${c.name} 저장됨`);
+  syncWorkout();
 }
-async function unsaveCard(ci){
+function unsaveCard(ci){
   const c = S.cards[ci];
-  if (!(await needFresh())) return;
-  const prev = { saved: c.saved, dirty: c.dirty, snap: c.snap };
-  c.saved = false; c.snap = null; c.dirty = false;
-  try { await persistWorkout(); renderCards(); recalc(); scheduleSave(); snapshotCache(); toast(`${c.name} 기록을 취소했어요`); }
-  catch (err){ Object.assign(c, prev); renderCards(); toast('취소 실패: ' + errMsg(err)); }
+  if (!S.fresh){ needFresh().then(ok => { if (ok) unsaveCard(ci); }); return; }
+  c.saved = false; c.snap = null; c.dirty = false; WS.dirty = true;
+  renderCards(); recalc(); scheduleSave(); snapshotCache(); toast(`${c.name} 기록을 취소했어요`);
+  syncWorkout();
 }
 function shiftDate(n){
   const p = ($('#date').value || S.init.today).split('-').map(Number);
@@ -602,7 +638,7 @@ async function doSave(){
         S.foods[k] = { kcal: m.kcal, protein: m.protein };
       }
     });
-    fillFoodList(); setChip('저장됨 ✓', 'ok'); snapshotCache();
+    fillFoodList(); WS.bad ? setChip(WS_BAD, 'bad') : setChip('저장됨 ✓', 'ok'); snapshotCache();
   } catch (err){ setChip('저장 실패 · ' + errMsg(err), 'bad'); }
   S.saving = false;
   if (S.again){ S.again = false; doSave(); }
@@ -954,6 +990,73 @@ function drawWeek(){
   mk('c-week', { type: 'bar', data: { labels: keys.map(k => k.slice(5) + '~'), datasets: [{ data: keys.map(k => w[k]), backgroundColor: '#2563eb' }] },
     options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } } });
 }
+
+// ───── 휴식 타이머 · 햅틱 ─────
+const RESTK = 'gym.rest';
+const REST = { sec: Number(lsGet(RESTK)) || 90, end: {}, iv: null, wl: null, actx: null };
+function haptic(p){
+  try { if (navigator.vibrate){ navigator.vibrate(p); return; } } catch (e) {}
+  try { const l = $('#hapl'); if (l) l.click(); } catch (e) {}    // 아이폰(Safari 17.4+)은 숨은 스위치를 눌러 짧은 햅틱을 내요
+}
+document.addEventListener('click', e => { if (e.target.closest('button, .chip')) haptic(12); }, true);   // 버튼이 눌렸다는 걸 손끝으로 알려줌
+const fmtT = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+function restLabel(name){
+  const e = REST.end[name];
+  return e ? '⏱ ' + fmtT(Math.max(0, Math.ceil((e - Date.now()) / 1000))) : '⏱ ' + REST.sec + '초';
+}
+function paintRest(){
+  document.querySelectorAll('.tmr').forEach(b => {
+    b.classList.toggle('run', !!REST.end[b.dataset.n]);
+    b.textContent = restLabel(b.dataset.n);
+  });
+}
+function unlockAudio(){
+  try { if (!REST.actx) REST.actx = new (window.AudioContext || window.webkitAudioContext)(); if (REST.actx.state === 'suspended') REST.actx.resume(); } catch (e) {}
+}
+function beep(){      // 진동이 안 되는 기기(아이폰)에서만 짧은 알림음
+  try {
+    const a = REST.actx; if (!a) return;
+    [0, .25, .5].forEach(t => {
+      const o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; g.gain.value = .15;
+      o.connect(g); g.connect(a.destination); o.start(a.currentTime + t); o.stop(a.currentTime + t + .15);
+    });
+  } catch (e) {}
+}
+async function keepAwake(on){     // 휴식 중에는 화면이 꺼지지 않게 (꺼지면 진동이 안 울려요)
+  try {
+    if (on){
+      if (!REST.wl && navigator.wakeLock){
+        REST.wl = await navigator.wakeLock.request('screen');
+        REST.wl.addEventListener('release', () => { REST.wl = null; });
+      }
+    } else if (REST.wl){ const w = REST.wl; REST.wl = null; await w.release(); }
+  } catch (e) {}
+}
+function startRest(name){
+  unlockAudio();
+  REST.end[name] = Date.now() + REST.sec * 1000;     // 남은 시간은 '끝나는 시각'으로 계산해서 화면이 멈췄다 켜져도 정확해요
+  paintRest();
+  if (!REST.iv) REST.iv = setInterval(tickRest, 250);
+  keepAwake(true);
+}
+function tickRest(){
+  const now = Date.now(), fin = [];
+  Object.keys(REST.end).forEach(n => { if (REST.end[n] <= now){ delete REST.end[n]; fin.push(n); } });
+  if (fin.length){
+    haptic([350, 120, 350, 120, 350]);
+    if (!navigator.vibrate) beep();
+    toast('휴식 끝 · ' + fin.join(', '));
+  }
+  if (!Object.keys(REST.end).length){ clearInterval(REST.iv); REST.iv = null; keepAwake(false); }
+  paintRest();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (REST.iv){ tickRest(); keepAwake(true); }
+  if (WS.dirty && !WS.run && S.fresh) syncWorkout();      // 닫혀 있는 동안 끊긴 저장은 다시 켜질 때 이어서 올려요
+});
+$('#restsel').value = String(REST.sec);
+$('#restsel').onchange = () => { REST.sec = +$('#restsel').value || 90; lsSet(RESTK, REST.sec); paintRest(); };
 
 // ───── 시작 ─────
 window.addEventListener('online', () => { if (getCfg() && !S.fresh) location.reload(); });

@@ -1,6 +1,6 @@
 // 화면 파일을 폰에 저장해 두고 바로 띄우는 서비스워커 (데이터는 건드리지 않음)
 // 화면을 고쳐서 올린 뒤에는 V 숫자를 올리면 새 버전이 빨리 반영돼요.
-const V = 'gym-v1';
+const V = 'gym-v2';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
