@@ -113,6 +113,7 @@ textarea{resize:vertical;font:inherit}
 .f2 label{font-size:13px;color:var(--sub)}
 .tmr{background:var(--inp);color:var(--sub);min-width:88px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .tmr.run{background:var(--okbg);color:var(--ok)}
+.tmrc{background:var(--inp);color:var(--sub);white-space:nowrap;padding-left:10px;padding-right:10px}
 #hapl{position:fixed;left:-100px;top:-100px;opacity:0;pointer-events:none}
 #setup{position:fixed;inset:0;z-index:50;background:var(--bg);overflow:auto;padding:calc(24px + env(safe-area-inset-top,0px)) 14px 24px}
 #setup h2{margin:0 0 6px;font-size:20px}
@@ -511,6 +512,7 @@ function renderCards(){
         ${c.unit === 'min' ? '' : `<button data-act="add" data-c="${ci}">세트 추가</button>`}
         <button class="main sv" data-act="save" data-c="${ci}">${svLabel(c)}</button>
         <button class="tmr" data-act="rest" data-n="${esc(c.name)}">${restLabel(c.name)}</button>
+        <button class="tmrc" data-act="restsec" data-n="${esc(c.name)}" aria-label="휴식 시간 변경">시간</button>
       </div>
       ${c.saved ? `<div style="text-align:right;margin-top:6px"><button class="ic" data-act="unsave" data-c="${ci}" style="font-size:13px">기록 취소</button></div>` : ''}
     </div>`;
@@ -531,6 +533,7 @@ $('#list').addEventListener('click', e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act;
   if (act === 'rest'){ startRest(b.dataset.n); return; }
+  if (act === 'restsec'){ cycleRest(b.dataset.n); return; }
   const ci = +b.dataset.c, c = S.cards[ci];
   if (act === 'add'){ const l = c.sets[c.sets.length - 1] || { kg: '', reps: '' }; c.sets.push({ kg: l.kg, reps: l.reps }); c.dirty = true; renderCards(); }
   if (act === 'del'){ c.sets.splice(+b.dataset.s, 1); c.dirty = true; renderCards(); }
@@ -994,6 +997,30 @@ function drawWeek(){
 // ───── 휴식 타이머 · 햅틱 ─────
 const RESTK = 'gym.rest';
 const REST = { sec: Number(lsGet(RESTK)) || 90, end: {}, iv: null, wl: null, actx: null };
+// 종목별 휴식 시간: 직접 바꾼 값 > 종목 기본값 > 상단 드롭다운 값 순서로 써요
+const RESTPERK = 'gym.restPer';
+REST.per = (lsGet(RESTPERK) && typeof lsGet(RESTPERK) === 'object') ? lsGet(RESTPERK) : {};
+const REST_OPTS = [60, 90, 120, 150];
+const REST_RULES = [      // 위에서부터 먼저 맞는 규칙을 써요 (0 = 기본값 없음 → 상단 드롭다운 값)
+  [/백\s*익스텐션|레그\s*컬|힙\s*스러스트/, 0],
+  [/리버스\s*펙덱/, 120],
+  [/체스트\s*프레스|벤치|랫\s*풀다운|레그\s*프레스|루마니안/, 150],
+  [/숄더\s*프레스|시티드\s*로우|바벨\s*로우|인클라인\s*덤벨|덤벨\s*프레스/, 120],
+  [/원암|암\s*풀다운|페이스\s*풀|펙덱|플라이|덤벨\s*로우/, 90],
+  [/레터럴|사레레|컬|트라이셉|푸시다운|익스텐션/, 60]
+];
+function restDefault(name){
+  for (const [re, sec] of REST_RULES){ if (re.test(name)) return sec || 0; }
+  return 0;
+}
+function restSec(name){ return REST.per[name] || restDefault(name) || REST.sec; }
+function cycleRest(name){
+  const cur = restSec(name), i = REST_OPTS.indexOf(cur);
+  REST.per[name] = REST_OPTS[(i + 1) % REST_OPTS.length];      // 목록에 없는 값이면 60초부터 시작해요
+  lsSet(RESTPERK, REST.per);
+  paintRest();
+  toast(name + ' 휴식 ' + REST.per[name] + '초');
+}
 function haptic(p){
   try { if (navigator.vibrate){ navigator.vibrate(p); return; } } catch (e) {}
   try { const l = $('#hapl'); if (l) l.click(); } catch (e) {}    // 아이폰(Safari 17.4+)은 숨은 스위치를 눌러 짧은 햅틱을 내요
@@ -1002,7 +1029,7 @@ document.addEventListener('click', e => { if (e.target.closest('button, .chip'))
 const fmtT = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
 function restLabel(name){
   const e = REST.end[name];
-  return e ? '⏱ ' + fmtT(Math.max(0, Math.ceil((e - Date.now()) / 1000))) : '⏱ ' + REST.sec + '초';
+  return e ? '⏱ ' + fmtT(Math.max(0, Math.ceil((e - Date.now()) / 1000))) : '⏱ ' + restSec(name) + '초';
 }
 function paintRest(){
   document.querySelectorAll('.tmr').forEach(b => {
@@ -1034,7 +1061,7 @@ async function keepAwake(on){     // 휴식 중에는 화면이 꺼지지 않게
 }
 function startRest(name){
   unlockAudio();
-  REST.end[name] = Date.now() + REST.sec * 1000;     // 남은 시간은 '끝나는 시각'으로 계산해서 화면이 멈췄다 켜져도 정확해요
+  REST.end[name] = Date.now() + restSec(name) * 1000;     // 남은 시간은 '끝나는 시각'으로 계산해서 화면이 멈췄다 켜져도 정확해요
   paintRest();
   if (!REST.iv) REST.iv = setInterval(tickRest, 250);
   keepAwake(true);
