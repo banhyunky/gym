@@ -1186,7 +1186,11 @@ $('#restsel').onchange = () => { REST.sec = +$('#restsel').value || 90; lsSet(RE
 
 // ───── 시작 ─────
 window.addEventListener('online', () => { if (getCfg() && !S.fresh) location.reload(); });
-if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+if ('serviceWorker' in navigator) window.addEventListener('load', () => {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded){ reloaded = true; location.reload(); } });
+});
 boot().catch(err => showListError('앱을 불러오지 못했어요', err, () => location.reload()));
 </script>
 </body>
