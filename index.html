@@ -676,7 +676,7 @@ function renderCalendar(){
   const firstDow = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
   const nd = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const set = new Set(S.workoutDays);
-  let html = DOW.map(d => '<div class="dow">' + d + '</div>').join('');
+  let html = ['일','월','화','수','목','금','토'].map(d => '<div class="dow">' + d + '</div>').join('');
   for (let i = 0; i < firstDow; i++) html += '<div class="d mute"></div>';
   for (let d = 1; d <= nd; d++){
     const ds = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
