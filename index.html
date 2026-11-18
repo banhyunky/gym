@@ -130,6 +130,7 @@ textarea{resize:vertical;font:inherit}
 .calgrid .d.sel{background:var(--acbg);border-color:var(--ac)}
 .calgrid .d.done::after{content:'';position:absolute;bottom:5px;width:6px;height:6px;border-radius:50%;background:var(--ok)}
 .mini .streak b{color:#d97706}
+.mini .streak i{display:block;font-size:10px;font-style:normal;color:var(--sub);margin-top:1px}
 </style>
 </head>
 <body>
@@ -656,6 +657,13 @@ function calcStreak(){
   return n;
 }
 function updateStreak(){ S.streak = calcStreak(); }
+const START_DATE = '2026-08-11';
+function daysSinceStart(){
+  if (!S.init) return 0;
+  const a = START_DATE.split('-').map(Number), b = S.init.today.split('-').map(Number);
+  const ms = Date.UTC(b[0], b[1] - 1, b[2]) - Date.UTC(a[0], a[1] - 1, a[2]);
+  return Math.floor(ms / 86400000) + 1;
+}
 function syncWorkoutDayFlag(){
   if (!S.date) return;
   const has = S.cards.some(c => c.saved) || weightMin() > 0 || (Number(S.walk) || 0) > 0;
@@ -935,7 +943,7 @@ function renderGoals(){
   }
   box.innerHTML = h;
   const d2 = burn - eat;
-  $('#mini').innerHTML = `<div class="streak"><span>연속</span><b>${S.streak}일${S.streak > 0 ? ' 🔥' : ''}</b></div><div><span>먹음</span><b>${n0(eat)}</b></div><div><span>씀(추정)</span><b>${burn ? n0(burn) : '—'}</b></div>` +
+  $('#mini').innerHTML = `<div class="streak"><span>연속</span><b>${S.streak}일${S.streak > 0 ? ' 🔥' : ''}</b><i>D+${daysSinceStart()}</i></div><div><span>먹음</span><b>${n0(eat)}</b></div><div><span>씀(추정)</span><b>${burn ? n0(burn) : '—'}</b></div>` +
     `<div class="${burn ? (d2 >= 0 ? 'def' : 'sur') : ''}"><span>${burn && d2 < 0 ? '잉여' : '적자'}</span><b>${burn ? n0(Math.abs(d2)) : '—'}</b></div>`;
 }
 
