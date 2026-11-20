@@ -132,6 +132,19 @@ textarea{resize:vertical;font:inherit}
 .mini .streak b{color:#d97706}
 .mini .streak i{display:block;font-size:10px;font-style:normal;color:var(--sub);margin-top:1px}
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey: "AIzaSyAGitDekuw0fznFf2Y-Y49T6vQVrG4s4xM",
+    authDomain: "banhyunky-gym.firebaseapp.com",
+    projectId: "banhyunky-gym",
+    storageBucket: "banhyunky-gym.firebasestorage.app",
+    messagingSenderId: "1094960318697",
+    appId: "1:1094960318697:web:531e13e042151605a5c878"
+  });
+  const FCM_VAPID_KEY = "BPI5GawugAIY3QFDAju4L2UV1siXYSAlHqMHMDtFDGVKxtsArN6KL4rulgT-LDgcNMooutAilaxLf2jyOUoYMhs";
+</script>
 </head>
 <body>
 <header>
@@ -1160,10 +1173,12 @@ async function keepAwake(on){     // 휴식 중에는 화면이 꺼지지 않게
 }
 function startRest(name){
   unlockAudio();
-  REST.end[name] = Date.now() + restSec(name) * 1000;     // 남은 시간은 '끝나는 시각'으로 계산해서 화면이 멈췄다 켜져도 정확해요
+  const sec = restSec(name);
+  REST.end[name] = Date.now() + sec * 1000;     // 남은 시간은 '끝나는 시각'으로 계산해서 화면이 멈췄다 켜져도 정확해요
   paintRest();
   if (!REST.iv) REST.iv = setInterval(tickRest, 250);
   keepAwake(true);
+  if (getCfg()) run('scheduleRestPush', sec, '휴식 끝 ⏱', name + ' · 다음 세트 시작하세요').catch(() => {});
 }
 function tickRest(){
   const now = Date.now(), fin = [];
@@ -1186,8 +1201,22 @@ $('#restsel').onchange = () => { REST.sec = +$('#restsel').value || 90; lsSet(RE
 
 // ───── 시작 ─────
 window.addEventListener('online', () => { if (getCfg() && !S.fresh) location.reload(); });
+async function setupPush(reg){
+  try {
+    if (!getCfg()) return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'denied') return;
+    if (Notification.permission !== 'granted'){
+      const p = await Notification.requestPermission();
+      if (p !== 'granted') return;
+    }
+    const messaging = firebase.messaging();
+    const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: reg });
+    if (token) run('saveFcmToken', token).catch(() => {});
+  } catch (e) {}
+}
 if ('serviceWorker' in navigator) window.addEventListener('load', () => {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.register('sw.js').then(reg => setupPush(reg)).catch(() => {});
   let reloaded = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded){ reloaded = true; location.reload(); } });
 });
