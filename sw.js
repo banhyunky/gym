@@ -29,7 +29,7 @@ self.addEventListener('push', e => {
   const body = data.body || '';
   e.waitUntil(self.registration.showNotification(title, {
     body,
-    vibrate: [500, 200, 500, 200, 800],
+    vibrate: [600, 200, 600, 200, 600, 200, 1200],
     tag: 'rest-timer',
     renotify: true,
     icon: 'icon-192.png',
